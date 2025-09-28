@@ -1,105 +1,89 @@
-//    Copyright (c) 2022
-//    Author      : Bruno Capuano
-//    Create Time : 2022 March
-//    Change Log  :
-//    - Starts a webserver on port 80
-//    - Creates an endpoint named [/flash] to flash the camera
-//    - Turn ON and OFF the Flash on an ESP32-CAM board
-//
-//    The MIT License (MIT)
-//
-//    Permission is hereby granted, free of charge, to any person obtaining a copy
-//    of this software and associated documentation files (the "Software"), to deal
-//    in the Software without restriction, including without limitation the rights
-//    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-//    copies of the Software, and to permit persons to whom the Software is
-//    furnished to do so, subject to the following conditions:
-//
-//    The above copyright notice and this permission notice shall be included in
-//    all copies or substantial portions of the Software.
-//
-//    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-//    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-//    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-//    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-//    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-//    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-//    THE SOFTWARE.
+/**
+ * @file http_post.ino
+ * @author SeanKwok (shaoxiang@m5stack.com)
+ * @brief TimerCAM HTTP Post Test
+ * @version 0.1
+ * @date 2023-12-28
+ *
+ *
+ * @Hardwares: TimerCAM
+ * @Platform Version: Arduino M5Stack Board Manager v2.0.9
+ * @Dependent Library:
+ * TimerCam-arduino: https://github.com/m5stack/TimerCam-arduino
+ * ArduinoHttpClient: https://github.com/arduino-libraries/ArduinoHttpClient
+ */
 
-#include "WiFi.h"
-#include "esp_camera.h"
-#include "esp_timer.h"
-#include "img_converters.h"
-#include "Arduino.h"
-#include "soc/soc.h"          // Disable brownour problems
-#include "soc/rtc_cntl_reg.h" // Disable brownour problems
-#include "driver/rtc_io.h"
-#include <ESPAsyncWebServer.h>
-#include <StringArray.h>
-#include <SPIFFS.h>
-#include <FS.h>
+#include "M5TimerCAM.h"
+#include <WiFi.h>
+#include <ArduinoHttpClient.h>
 
-// Replace with your network credentials
-const char *ssid = "IoTLabs2";
-const char *password = "12345678";
+#define ssid     ""
+#define password ""
 
-// ledPin refers to ESP32-CAM GPIO 4 (flashlight)
-#define FLASH_GPIO_NUM 4
+#define SERVER "192.168.86.245"
 
-// Create AsyncWebServer object on port 80
-AsyncWebServer server(80);
+WiFiClient wifi;
+HttpClient client = HttpClient(wifi, SERVER, 8000);
 
-void flashOnForNSeconds(int seconds)
-{
-  digitalWrite(FLASH_GPIO_NUM, HIGH);
-  delay(seconds * 1000);
-  digitalWrite(FLASH_GPIO_NUM, LOW);
+void setup() {
+    TimerCAM.begin();
+
+    if (!TimerCAM.Camera.begin()) {
+        // Serial.println("Camera Init Fail");
+        return;
+    }
+    Serial.println("AAAAAAAA");
+
+    TimerCAM.Camera.sensor->set_pixformat(TimerCAM.Camera.sensor, PIXFORMAT_JPEG);
+    // 2MP Sensor
+    TimerCAM.Camera.sensor->set_framesize(TimerCAM.Camera.sensor, FRAMESIZE_XGA);
+    // 3MP Sensor
+    // TimerCAM.Camera.sensor->set_framesize(TimerCAM.Camera.sensor, FRAMESIZE_QXGA);
+
+    TimerCAM.Camera.sensor->set_vflip(TimerCAM.Camera.sensor, 1);
+    TimerCAM.Camera.sensor->set_hmirror(TimerCAM.Camera.sensor, 0);
+
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+    WiFi.setSleep(false);
+    Serial.begin(115200);
+    Serial.println("");
+    Serial.print("Connecting to ");
+    Serial.println(ssid);
+    // Wait for connection
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+
+    Serial.println("");
+
+    Serial.print("Connected to ");
+    Serial.println(ssid);
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
 }
 
-void initAndConnectWifi()
-{
-  // Connect to Wi-Fi
-  int startWifiTime = millis();
-  int connectAttemps = 0;
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    int secondsWaiting = (millis() - startWifiTime) / 1000;
-    Serial.println("Connecting to WiFi..");
-    Serial.print("Seconds waiting : ");
-    Serial.println(secondsWaiting);
-    delay(1000);
-    connectAttemps++;
-  }
+void loop() {
+    if (TimerCAM.Camera.get()) {
+        Serial.println("making POST request");
 
-  // Print ESP32 Local IP Address
-  Serial.print("IP Address: http://");
-  Serial.println(WiFi.localIP());
-}
+        String contentType = "image/jpeg";
 
-void setup()
-{
-  // Serial port for debugging purposes
-  Serial.begin(9600);
+        // client.post("/post", contentType, postData);
+        client.post("/image/", contentType.c_str(), TimerCAM.Camera.fb->len, TimerCAM.Camera.fb->buf);
 
-  // initialize digital pin ledPin as an output
-  pinMode(FLASH_GPIO_NUM, OUTPUT);
-  
-  flashOnForNSeconds(1);
+        // read the status code and body of the response
+        int statusCode  = client.responseStatusCode();
+        String response = client.responseBody();
 
-  initAndConnectWifi();
+        Serial.print("Status code: ");
+        Serial.println(statusCode);
+        Serial.print("Response: ");
+        Serial.println(response);
 
-  // Route for trigger flash
-  server.on("/flash", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-              flashOnForNSeconds(1);
-              request->send_P(200, "text/plain", "Flash Triggered"); });
-
-  // Start server
-  server.begin();
-}
-
-void loop()
-{
-  delay(10);
+        Serial.println("Wait five seconds");
+        TimerCAM.Camera.free();
+        delay(5000);
+    }
 }
